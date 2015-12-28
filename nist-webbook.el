@@ -7,6 +7,8 @@
 
 ;;; Code:
 
+(require 'org)
+
 (defun nist-webbook-formula (formula)
   "Search NIST webbook for FORMULA."
   (interactive "sFormula: ")
@@ -21,8 +23,8 @@
   (interactive "sChemical Name: ")
   (browse-url
    (concat "http://webbook.nist.gov/cgi/cbook.cgi?Name="
-	   (url-hexify-string name)
-	   "&Units=SI")))
+           (url-hexify-string name)
+           "&Units=SI")))
 
 
 (org-add-link-type
