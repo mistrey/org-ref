@@ -3,6 +3,8 @@
 #+DATE: 2015-03-15 Sun
 #+OPTIONS: toc:nil ^:{}
 #+LATEX_HEADER: \usepackage{natbib}
+#+LATEX_HEADER: \usepackage{makeidx}
+#+LATEX_HEADER: \makeindex
 \maketitle
 \tableofcontents
 
@@ -505,7 +507,7 @@ You may want to build an html version of this file. Here is an emacs-lisp block 
 #+RESULTS:
 : #<process open ./org-ref.html>
 
-* References
+* References                                                          :ignore:
 bibliographystyle:unsrtnat
-# <<bibliography link>>
+<<bibliography link>>
 bibliography:org-ref.bib
