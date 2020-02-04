@@ -29,31 +29,36 @@
 (require 'dash)
 (require 'f)
 (require 'org)
-(require 'org-ref)
 (require 's)
+(require 'org-ref-utils)
+(require 'parsebib)
+
 
 ;; This is a local variable defined in `url-http'.  We need it to avoid
 ;; byte-compiler errors.
-(defvar-local url-http-end-of-headers nil)
+(defvar url-http-end-of-headers)
+(defvar org-ref-default-bibliography)
+(defvar org-ref-pdf-directory)
+
+(declare-function parsebib-find-bibtex-dialect "parsebib")
+(declare-function org-ref-clean-bibtex-entry "org-ref-core")
+;; this is a C function
+(declare-function libxml-parse-xml-region "xml")
 
 ;;* The org-mode link
 ;; this just makes a clickable link that opens the entry.
 ;; example: arxiv:cond-mat/0410285
-(org-add-link-type
- "arxiv"
- ;; clicking
- (lambda (link-string)
-   (browse-url (format "http://arxiv.org/abs/%s" link-string)))
- ;; formatting
- (lambda (keyword desc format)
-   (cond
-    ((eq format 'html)
-     (format  "<a href=\"http://arxiv.org/abs/%s\">arxiv:%s</a>"
-	      keyword  (or desc keyword)))
-    ((eq format 'latex)
-     ;; write out the latex command
-     (format "\\url{http://arxiv.org/abs/%s}{%s}" keyword (or desc keyword))))))
-
+(org-ref-link-set-parameters "arxiv"
+  :follow (lambda (link-string)
+            (browse-url (format "http://arxiv.org/abs/%s" link-string)))
+  :export (lambda (keyword desc format)
+            (cond
+             ((eq format 'html)
+              (format  "<a href=\"http://arxiv.org/abs/%s\">arxiv:%s</a>"
+                       keyword  (or desc keyword)))
+             ((eq format 'latex)
+              ;; write out the latex command
+              (format "\\url{http://arxiv.org/abs/%s}{%s}" keyword (or desc keyword))))))
 
 ;;* Getting a bibtex entry for an arXiv article using remote service:
 ;; For an arxiv article, there is a link to a NASA ADS page like this:
@@ -94,6 +99,7 @@
 ;; extracts the necessary information, and formats a new BibTeX entry.
 
 (defvar arxiv-entry-format-string "@article{%s,
+  journal = {CoRR},
   title = {%s},
   author = {%s},
   archivePrefix = {arXiv},
@@ -128,6 +134,8 @@ Returns a formatted BibTeX entry."
            (temp-bibtex (format arxiv-entry-format-string "" title names year arxiv-number category abstract url))
            (key (with-temp-buffer
                   (insert temp-bibtex)
+		  (bibtex-mode)
+		  (bibtex-set-dialect (parsebib-find-bibtex-dialect) t)
                   (bibtex-generate-autokey))))
       (format arxiv-entry-format-string key title names year arxiv-number category abstract url))))
 
@@ -139,12 +147,13 @@ Returns a formatted BibTeX entry."
                  (--map (s-split " +" it) authors))))
 
 
+;;;###autoload
 (defun arxiv-add-bibtex-entry (arxiv-number bibfile)
   "Add bibtex entry for ARXIV-NUMBER to BIBFILE."
   (interactive
    (list (read-string "arxiv: ")
          ;;  now get the bibfile to add it to
-         (ido-completing-read
+         (completing-read
           "Bibfile: "
           (append (f-entries "." (lambda (f) (f-ext? f "bib")))
                   org-ref-default-bibliography))))
@@ -153,9 +162,13 @@ Returns a formatted BibTeX entry."
     (goto-char (point-max))
     (when (not (looking-at "^")) (insert "\n"))
     (insert (arxiv-get-bibtex-entry-via-arxiv-api arxiv-number))
+    (org-ref-clean-bibtex-entry)
+    (goto-char (point-max))
+    (when (not (looking-at "^")) (insert "\n"))
     (save-buffer)))
 
 
+;;;###autoload
 (defun arxiv-get-pdf (arxiv-number pdf)
   "Retrieve a pdf for ARXIV-NUMBER and save it to PDF."
   (interactive "sarxiv: \nsPDF: ")
@@ -170,18 +183,12 @@ Returns a formatted BibTeX entry."
                    (match-string 1))))
     (url-copy-file pdf-url pdf)
     ;; now check if we got a pdf
-    (with-temp-buffer
-      (insert-file-contents pdf)
-      ;; PDFS start with %PDF-1.x as the first few characters.
-      (if (not (string= (buffer-substring 1 6) "%PDF-"))
-          (progn
-            (message "%s" (buffer-string))
-            (delete-file pdf))
-        (message "%s saved" pdf)))
+    (if (org-ref-pdf-p pdf)
+        (org-open-file pdf)
+      (delete-file pdf)
+      (message "Error downloading arxiv pdf %s" pdf-url))))
 
-    (org-open-file pdf)))
-
-
+;;;###autoload
 (defun arxiv-get-pdf-add-bibtex-entry (arxiv-number bibfile pdfdir)
   "Add bibtex entry for ARXIV-NUMBER to BIBFILE.
 Remove troublesome chars from the bibtex key, retrieve a pdf
@@ -190,11 +197,11 @@ key."
   (interactive
    (list (read-string "arxiv: ")
          ;;  now get the bibfile to add it to
-         (ido-completing-read
+         (completing-read
           "Bibfile: "
           (append (f-entries "." (lambda (f) (f-ext? f "bib")))
                   org-ref-default-bibliography))
-         (ido-read-directory-name
+         (read-directory-name
           "PDF directory: "
           org-ref-pdf-directory)))
 
@@ -213,7 +220,7 @@ key."
                        (match-end bibtex-key-in-head)))
             ;; remove potentially troublesome characters from key
             ;; as it will be used as  a filename
-            (setq key (replace-regexp-in-string   "\"\\|\\*\\|/\\|:\\|<\\|>\\|\\?\\|\\\\\\||\\|\\+\\|,\\|\\.\\|;\\|=\\|\\[\\|]\\|:\\|!\\|@"
+            (setq key (replace-regexp-in-string   "\"\\|\\*\\|/\\|:\\|<\\|>\\|\\?\\|\\\\\\||\\|\\+\\|,\\|\\.\\|;\\|=\\|\\[\\|]\\|!\\|@"
                                                   "" key))
             ;; check if the key is in the buffer
             (when (save-excursion

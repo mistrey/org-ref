@@ -1,9 +1,14 @@
-;;; org-ref-scifinder.el --- Emacs interface to SciFinder
+;;; org-ref-ivy.el --- org-ref with ivy completion -*- lexical-binding: t; -*-
 
-;; Copyright (C) 2015  John Kitchin
+;; Copyright (C) 2016  John Kitchin
 
 ;; Author: John Kitchin <jkitchin@andrew.cmu.edu>
-;; Keywords:
+;; URL: https://github.com/jkitchin/org-ref
+;; Version: 0.8.1
+;; Keywords: org-mode, cite, ref, label
+;; Package-Requires: ((dash "2.11.0") (ivy "0.8.0") (hydra "0.13.2") (key-chord "0") (s "1.10.0") (f "0.18.0") (parsebib "0")  (emacs "24.4"))
+
+;; This file is not currently part of GNU Emacs.
 
 ;; This program is free software; you can redistribute it and/or modify
 ;; it under the terms of the GNU General Public License as published by
@@ -19,17 +24,12 @@
 ;; along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 ;;; Commentary:
-;; Hopefully this eventually integrates the Scifinder API into Emacs. For now,
-;; there is just one function that opens Scifinder for you.
+(setq org-ref-completion-library 'org-ref-ivy-cite)
 
-;;; Code:
+(require 'org-ref-ivy-cite)
 
-;;;###autoload
-(defun scifinder ()
-  "Open https://scifinder.cas.org/scifinder/view/scifinder/scifinderExplore.jsf in a browser."
-  (interactive)
-  (browse-url "https://scifinder.cas.org/scifinder/view/scifinder/scifinderExplore.jsf"))
+(org-ref-ivy-cite-completion)
 
-(provide 'org-ref-scifinder)
+(provide 'org-ref-ivy)
 
-;;; org-ref-scifinder.el ends here
+;;; org-ref-ivy.el ends here

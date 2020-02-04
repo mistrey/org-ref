@@ -25,7 +25,6 @@
     (vertical-align . baseline)))
 
 
-
 (setq bibliography-style
   '((sort . nil)
     (hanging-indent . 3)

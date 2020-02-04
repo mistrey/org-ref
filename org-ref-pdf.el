@@ -27,7 +27,18 @@
 ;; get a doi. This needs a reliable title/citation.
 
 ;;; Code:
+
 (require 'f)
+
+;; [2019-10-13 Sun] I am commenting this out for now. I added it for some
+;; reason, but I cannot figure out why. It is pretty slow to load, so since I
+;; don't know why it is here, I am commenting it out until it is obvious again.
+;; (require 'pdf-tools)
+
+(eval-when-compile
+  (require 'cl-lib))
+
+(declare-function org-ref-bibtex-key-from-doi "org-ref-bibtex.el")
 
 (defgroup org-ref-pdf nil
   "Customization group for org-ref-pdf"
@@ -38,10 +49,20 @@
   "pdftotext"
   "Executable for pdftotext. Set if the executable is not on your
 path, or you want to use another version."
+  :type 'file
   :group 'org-ref-pdf)
 
-(unless (executable-find pdftotext-executable)
-  (error "%s not found." pdftotext-executable))
+(defcustom org-ref-pdf-doi-regex
+  "10\\.[0-9]\\{4,9\\}/[-+._;()/:A-Z0-9]+"
+  "Regular expression to match DOIs in a pdf converted to text."
+  :type 'regexp
+  :group 'org-ref-pdf)
+
+(defcustom org-ref-pdf-to-bibtex-function
+  'copy-file
+  "Function for getting  a pdf to the `org-ref-pdf-directory'.
+Defaults to `copy-file', but could also be `rename-file'."
+  :type 'File :group 'org-ref-pdf)
 
 (defun org-ref-extract-doi-from-pdf (pdf)
   "Try to extract a doi from a PDF file.
@@ -52,65 +73,88 @@ space or end of line.
 
 If there is a trailing . we chomp it off. Returns a list of doi
 strings, or nil.
+
 "
   (with-temp-buffer
     (insert (shell-command-to-string (format "%s %s -"
 					     pdftotext-executable
-					     (dnd-unescape-uri pdf))))
+					     (shell-quote-argument (dnd-unescape-uri pdf)))))
     (goto-char (point-min))
     (let ((matches '()))
-      (while (re-search-forward "dx.doi.org/\\(?1:[^]\n} \"]*\\)\\|\\(?:doi\\|DOI\\):\\s-?\\(?1:[^]}\n \"]*\\)" nil t)
+      (while (re-search-forward org-ref-pdf-doi-regex nil t)
 	;; I don't know how to avoid a trailing . on some dois with the
 	;; expression above, so if it is there, I chomp it off here.
-	(let ((doi (match-string 1)))
+	(let ((doi (match-string 0)))
 	  (when (s-ends-with? "." doi)
 	    (setq doi (substring doi 0 (- (length doi) 1))))
-	  (add-to-list 'matches doi)))
+	  (cl-pushnew doi matches :test #'equal)))
       matches)))
 
 
 (defun org-ref-pdf-doi-candidates (dois)
   "Generate candidate list for helm source.
 Used when multiple dois are found in a pdf file."
-  (loop for doi in dois
+  (cl-loop for doi in dois
 	collect
-	(cons
-	 (plist-get (doi-utils-get-json-metadata doi) :title)
-	 doi)))
+	(condition-case nil
+	    (cons
+	     (plist-get (doi-utils-get-json-metadata doi) :title)
+	     doi)
+	  (error (cons (format "%s read error" doi) doi)))))
 
 
-(defun org-ref-pdf-add-dois (candidate)
+(defun org-ref-pdf-add-dois (_)
   "Add all entries for CANDIDATE in `helm-marked-candidates'."
-  (loop for doi in (helm-marked-candidates)
-	do
-	(doi-utils-add-bibtex-entry-from-doi
-	 doi
-	 (buffer-file-name))
-	;; this removes two blank lines before each entry.
-	(bibtex-beginning-of-entry)
-	(delete-char -2)))
+  (cl-loop for doi in (helm-marked-candidates)
+	   do
+	   (doi-utils-add-bibtex-entry-from-doi
+	    doi
+	    (buffer-file-name))))
 
+;;;###autoload
+(defun org-ref-pdf-to-bibtex ()
+  "Add pdf of current buffer to bib file and save pdf to
+`org-ref-default-bibliography'. The pdf should be open in Emacs
+using the `pdf-tools' package."
+  (interactive)
+  (when (not (f-ext? (downcase (buffer-file-name)) "pdf"))
+    (error "Buffer is not a pdf file"))
+  ;; Get doi from pdf of current buffer
+  (let* ((dois (org-ref-extract-doi-from-pdf (buffer-file-name)))
+         (doi-utils-download-pdf nil)
+         (doi (if (= 1 (length dois))
+                  (car dois)
+                (completing-read "Select DOI: " dois))))
+    ;; Add bib entry from doi:
+    (doi-utils-add-bibtex-entry-from-doi doi)
+    ;; Copy pdf to `org-ref-pdf-directory':
+    (let ((key (org-ref-bibtex-key-from-doi doi)))
+      (funcall org-ref-pdf-to-bibtex-function
+	       (buffer-file-name)
+               (expand-file-name (format "%s.pdf" key)
+                                 org-ref-pdf-directory)))))
 
-(defun org-ref-pdf-dnd-func (event)
-  "Drag-n-drop support to add a bibtex entry from a pdf file."
-  (interactive "e")
-  (goto-char (nth 1 (event-start event)))
-  (x-focus-frame nil)
-  (let* ((payload (car (last event)))
-         (pdf (cadr payload))
-	 (dois (org-ref-extract-doi-from-pdf pdf)))
-    (cond
-     ((null dois)
-      (message "No doi found in %s" pdf))
-     ((= 1 (length dois))
-      (doi-utils-add-bibtex-entry-from-doi
-       (car dois)
-       (buffer-file-name)))
-     ;; Multiple DOIs found
-     (t
-      (helm :sources `((name . "Select a DOI")
-		       (candidates . ,(org-ref-pdf-doi-candidates dois))
-		       (action . org-ref-pdf-add-dois)))))))
+;;;###autoload
+;; (defun org-ref-pdf-dnd-func (event)
+;;   "Drag-n-drop support to add a bibtex entry from a pdf file."
+;;   (interactive "e")
+;;   (goto-char (nth 1 (event-start event)))
+;;   (x-focus-frame nil)
+;;   (let* ((payload (car (last event)))
+;;          (pdf (cadr payload))
+;; 	 (dois (org-ref-extract-doi-from-pdf pdf)))
+;;     (cond
+;;      ((null dois)
+;;       (message "No doi found in %s" pdf))
+;;      ((= 1 (length dois))
+;;       (doi-utils-add-bibtex-entry-from-doi
+;;        (car dois)
+;;        (buffer-file-name)))
+;;      ;; Multiple DOIs found
+;;      (t
+;;       (helm :sources `((name . "Select a DOI")
+;; 		       (candidates . ,(org-ref-pdf-doi-candidates dois))
+;; 		       (action . org-ref-pdf-add-dois)))))))
 
 ;; This isn't very flexible, as it hijacks all drag-n-drop events. I switched to
 ;; using `dnd-protocol-alist'.
@@ -126,67 +170,113 @@ Used when multiple dois are found in a pdf file."
 ;; that is essentially what ns-drag-n-drop enables, multiple handlers for
 ;; different uris that get dropped on the windwo.
 
-(defun org-ref-pdf-dnd-protocol (pdf action)
+(defun org-ref-pdf-dnd-protocol (uri action)
   "Drag-n-drop protocol.
 PDF will be a string like file:path.
 ACTION is what to do. It is required for `dnd-protocol-alist'.
-This function should only apply when in a bibtex file.
-"
-  (if (f-ext? (buffer-file-name) "bib")
-      (let ((dois (org-ref-extract-doi-from-pdf
-		   (substring pdf 5))))
+This function should only apply when in a bibtex file."
+  (if (and (buffer-file-name)
+	   (f-ext? (buffer-file-name) "bib"))
+      (let* ((path (substring uri 5))
+	     dois)
 	(cond
-	 ((null dois)
-	  (message "No doi found in %s" pdf)
-	  nil)
-	 ((= 1 (length dois))
-	  (doi-utils-add-bibtex-entry-from-doi
-	   (car dois)
-	   (buffer-file-name))
-	  action)
-	 ;; Multiple DOIs found
-	 (t
-	  (helm :sources `((name . "Select a DOI")
-			   (candidates . ,(org-ref-pdf-doi-candidates dois))
-			   (action . org-ref-pdf-add-dois)))
-	  action)))
+	 ((f-ext? path "pdf")
+	  (setq dois (org-ref-extract-doi-from-pdf
+		      path))
+	  (cond
+	   ((null dois)
+	    (message "No doi found in %s" path)
+	    nil)
+	   ((= 1 (length dois))
+	    ;; we do not need to get the pdf, since we have one.
+	    (let ((doi-utils-download-pdf nil))
+	      (doi-utils-add-bibtex-entry-from-doi
+	       (car dois)
+	       (buffer-file-name))
+	      ;; we should copy the pdf to the pdf directory though
+	      (let ((key (cdr (assoc "=key=" (bibtex-parse-entry)))))
+	      	(copy-file (dnd-unescape-uri path) (expand-file-name (format "%s.pdf" key) org-ref-pdf-directory))))
+	    action)
+	   ;; Multiple DOIs found
+	   (t
+	    (helm :sources `((name . "Select a DOI")
+			     (candidates . ,(org-ref-pdf-doi-candidates dois))
+			     (action . org-ref-pdf-add-dois)))
+	    action)))
+	 ;; drag a bib file on and add contents to the end of the file.
+	 ((f-ext? path "bib")
+	  (goto-char (point-max))
+	  (insert "\n")
+	  (insert-file-contents path))))
     ;; ignoring. pass back to dnd. Copied from `org-download-dnd'. Apparently
     ;; returning nil does not do this.
     (let ((dnd-protocol-alist
            (rassq-delete-all
             'org-ref-pdf-dnd-protocol
             (copy-alist dnd-protocol-alist))))
-      (dnd-handle-one-url nil action pdf))))
+      (dnd-handle-one-url nil action uri))))
 
 
 (add-to-list 'dnd-protocol-alist '("^file:" . org-ref-pdf-dnd-protocol))
 
 
+;;;###autoload
 (defun org-ref-pdf-dir-to-bibtex (bibfile directory)
   "Create BIBFILE from pdf files in DIRECTORY."
-  (interactive "sBibtex file: \nDDirectory: ")
+  (interactive (list
+		(read-file-name "Bibtex file: ")
+		(read-directory-name "Directory: ")))
   (find-file bibfile)
   (goto-char (point-max))
 
-  (loop for pdf in (f-entries directory (lambda (f) (f-ext? f "pdf")))
-	do
-	(goto-char (point-max))
-	(insert (format "\n%% [[file:%s]]\n" pdf))
-	(let ((dois (org-ref-extract-doi-from-pdf pdf)))
-	  (cond
-	   ((null dois)
-	    (insert "% No doi found to create entry.\n"))
-	   ((= 1 (length dois))
-	    (doi-utils-add-bibtex-entry-from-doi
-	     (car dois)
-	     (buffer-file-name))
-	    (bibtex-beginning-of-entry)
-	    (delete-char -2))
-	   ;; Multiple DOIs found
-	   (t
-	    (helm :sources `((name . "Select a DOI")
-			     (candidates . ,(org-ref-pdf-doi-candidates dois))
-			     (action . org-ref-pdf-add-dois))))))))
+  (cl-loop for pdf in (f-entries directory (lambda (f) (f-ext? f "pdf")))
+	   do
+	   (goto-char (point-max))
+	   (let ((dois (org-ref-extract-doi-from-pdf pdf)))
+	     (cond
+	      ((null dois)
+	       (insert (format "%% No doi found to create entry in %s.\n" pdf)))
+	      ((= 1 (length dois))
+	       (doi-utils-add-bibtex-entry-from-doi
+		(car dois)
+		(buffer-file-name))
+	       (bibtex-beginning-of-entry)
+	       (insert (format "%% [[file:%s]]\n" pdf)))
+	      ;; Multiple DOIs found
+	      (t
+	       (insert (format "%% Multiple dois found in %s\n" pdf))
+	       (helm :sources `((name . "Select a DOI")
+				(candidates . ,(org-ref-pdf-doi-candidates dois))
+				(action . org-ref-pdf-add-dois))))))))
+
+
+;;;###autoload
+(defun org-ref-pdf-debug-pdf (pdf-file)
+  "Try to debug getting a doi from a pdf.
+Opens a buffer with the pdf converted to text, and `occur' on the
+variable `org-ref-pdf-doi-regex'."
+  (interactive "fPDF: ")
+  (switch-to-buffer (get-buffer-create "*org-ref-pdf debug*"))
+  (erase-buffer)
+  (insert (shell-command-to-string (format "%s %s -"
+					   pdftotext-executable
+					   (shell-quote-argument pdf-file))))
+  (goto-char (point-min))
+  (highlight-regexp org-ref-pdf-doi-regex)
+  (occur org-ref-pdf-doi-regex)
+  (switch-to-buffer-other-window "*Occur*"))
+
+
+;;;###autoload
+(defun org-ref-pdf-crossref-lookup ()
+  "Lookup highlighted text in PDFView in CrossRef."
+  (interactive)
+  (require 'pdf-view)
+  (pdf-view-assert-active-region)
+  (let* ((txt (pdf-view-active-region-text)))
+    (pdf-view-deactivate-region)
+    (crossref-lookup (mapconcat 'identity txt "	 \n"))))
+
 
 (provide 'org-ref-pdf)
 ;;; org-ref-pdf.el ends here

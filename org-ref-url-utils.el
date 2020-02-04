@@ -20,165 +20,179 @@
 
 ;;; Commentary:
 
-;; Drag a webpage onto a bibtex file to insert a bibtex entry. If the webpage is
-;; known in `org-ref-scrape-doi', it will scrape a doi, and then use `doi-utils'
-;; to insert a bibtex entry into the buffer.
+;; Drag a webpage onto a bibtex file to insert a bibtex entry.
 
-;; You can add new scraper recipes to the variable `org-ref-url-scrapers'.
+;; This works by scraping DOIs from the content at the URL using patterns in
+;; `org-ref-doi-regexps'. If one DOI is found, it is added as an entry. If
+;; multiple DOIs are found, you will get a helm selection buffer to choose what
+;; you want to add. You can add new patterns to `org-ref-doi-regexps'.
+
+;; You can press Control to "debug" a URL, which will open a buffer of the
+;; content with the current DOI patterns highlighted. If you want to get all the
+;; DOIs at a URL, you can press Meta during the drag-n-drop.
+
+;; You can also insert formatted bibtex entries using the
+;; `org-ref-url-html-to-bibtex' command, which converts a web page to
+;; bibtex or biblatex entry using URL. The org-cliplink package can
+;; help cleanup HTML code. Installing it is recommended.
 
 ;;; Code:
+(defvar org-ref-bibliography-entry-format)
+(defvar org-ref-get-pdf-filename-function)
+(defvar org-ref-notes-function)
+(defvar org-ref-cite-types)
+(defvar org-cliplink-escape-alist)
+
+(declare-function 'org-ref-get-bibtex-key-and-file "org-ref-core.el")
+(declare-function 'org-ref-find-bibliography "org-ref-core.el")
+(declare-function 'org-ref-key-in-file-p "org-ref-core.el")
+(declare-function 'org-ref-bib-citation "org-ref-core.el")
+(declare-function 'org-ref-get-bibtex-key-under-cursor "org-ref-core.el")
+
 (require 'doi-utils)
+(require 'f)
+(require 's)
+(eval-when-compile
+  (require 'cl-lib))
 
-(defvar org-ref-url-scrapers
-  '( ;; ACS journals
-    ((string-match "http://pubs.acs.org" url)
-     (with-current-buffer (url-retrieve-synchronously url)
-       (re-search-forward "scheme=\"doi\" content=\"\\([^\"]*\\)\"")
-       (match-string 1)))
-
-    ;; AIP journals
-    ((string-match "http://scitation.aip.org/" url)
-     (with-current-buffer (url-retrieve-synchronously url)
-       (re-search-forward "citation_doi\" content=\"\\([^\"]*\\)\"")
-       (match-string 1)))
-
-    ;; APS journals
-    ((string-match "http://journals.aps.org" url)
-     (with-current-buffer (url-retrieve-synchronously url)
-       (re-search-forward "data-doi=\"\\([^\"]*\\)\"")
-       (match-string 1)))
-
-    ;; http://ecst.ecsdl.org ECS
-    ((string-match "http://ecst.ecsdl.org" url)
-     (with-current-buffer (url-retrieve-synchronously url)
-       (re-search-forward "content=\"\\([^\"]*\\)\" name=\"citation_doi")
-       (match-string 1)))
-
-    ;; http://iopscience.iop.org
-    ((string-match "http://iopscience.iop.org" url)
-     (with-current-buffer (url-retrieve-synchronously url)
-       (re-search-forward "name=\"citation_doi\" content=\"\\([^\"]*\\)\"")
-       (match-string 1)))
-
-    ;; http://jes.ecsdl.org
-    ((string-match "http://jes.ecsdl.org" url)
-     (with-current-buffer (url-retrieve-synchronously url)
-       (re-search-forward "content=\"\\([^\"]*\\)\" name=\"citation_doi")
-       (match-string 1)))
-
-    ;; http://www.jstor.org
-    ((string-match "http://www.jstor.org" url)
-     (with-current-buffer (url-retrieve-synchronously url)
-       (re-search-forward "objectDOI\" : \"\\([^\"]*\\)\"")
-       (match-string 1)))
-
-    ;; <meta name="citation_doi" content="doi:10.1038/nature15540">
-    ((string-match "http://www.nature.com" url)
-     (with-current-buffer (url-retrieve-synchronously url)
-       (re-search-forward "name=\"citation_doi\" content=\"doi:\\([^\"]*\\)\"")
-       (match-string 1)))
-
-    ;; http://www.pnas.org
-    ((string-match "http://www.pnas.org" url)
-     (with-current-buffer (url-retrieve-synchronously url)
-       (re-search-forward "content=\"\\([^\"]*\\)\" name=\"citation_doi")
-       (match-string 1)))
-
-    ;; http://pubs.rsc.org
-    ((string-match "http://pubs.rsc.org" url)
-     (with-current-buffer (url-retrieve-synchronously url)
-       (re-search-forward "scheme=\"doi\" content=\"\\([^\"]*\\)\"")
-       (match-string 1)))
-
-    ;; Science Magazine
-    ((string-match "http://www.sciencemag.org" url)
-     (with-current-buffer (url-retrieve-synchronously url)
-       (re-search-forward "content=\"\\([^\"]*\\)\" name=\"citation_doi")
-       (match-string 1)))
-
-    ;; ScienceDirect
-    ((string-match "http://www.sciencedirect.com/science/article" url)
-     (with-current-buffer (url-retrieve-synchronously url)
-       (re-search-forward "doi = '\\([^']*\\)'")
-       (match-string 1)))
-
-    ;; Springer journals
-    ((string-match "http://link.springer.com" url)
-     (with-current-buffer (url-retrieve-synchronously url)
-       (re-search-forward "name=\"citation_doi\" content=\"\\([^\"]*\\)\"")
-       (match-string 1)))
-
-    ;; http://www.tandfonline.com Taylor and Francis
-    ((string-match "http://www.tandfonline.com" url)
-     (with-current-buffer (url-retrieve-synchronously url)
-       (re-search-forward "scheme=\"doi\" content=\"\\([^\"]*\\)\"")
-       (match-string 1)))
-
-    ;; Wiley journals
-    ((string-match "http://onlinelibrary.wiley.com" url)
-     (with-current-buffer (url-retrieve-synchronously url)
-       (re-search-forward "name=\"citation_doi\" content=\"\\([^\"]*\\)\"")
-       (match-string 1)))
-
-    ;; A Pubmed page
-    ((string-match "http://www.ncbi.nlm.nih.gov/pubmed" url)
-     (with-current-buffer (url-retrieve-synchronously url)
-       (re-search-forward "\"http://dx.doi.org/\\([^\"]*\\)\"")
-       (match-string 1))))
-  "cond blocks to match urls, and a recipe to extract a DOI. This
-  variable exists to make it easy for users to add new recipes.")
+(defgroup org-ref-url nil
+  "Customization group for org-ref-url-utils"
+  :tag "Org Ref URL"
+  :group 'org-ref-url-utils)
 
 
-(defun org-ref-scrape-doi (url)
-  "Scrape a doi from a URL.
-These all work by regular expressions that were
-reverse-engineered for each publisher. You can add new scraper
-recipes by adding to `org-ref-url-scrapers'. A recipe looks like:
-((conditional statement matching a url) expressions that return a doi.)"
-  (eval `(cond
-	  ,@org-ref-url-scrapers
-	  (t
-	   (message
-	    "We don't know how to get a doi from %s. Try adding the doi by hand."
-	    url)
-	   nil))))
+(defcustom org-ref-doi-regexps
+  '("scheme=\"doi\" content=\"\\([^\"]*\\)\""
+    "citation_doi\" content=\"\\([^\"]*\\)\""
+    "data-doi=\"\\([^\"]*\\)\""
+    "content=\"\\([^\"]*\\)\" name=\"citation_doi"
+    "objectDOI\" : \"\\([^\"]*\\)\""
+    "doi = '\\([^']*\\)'"
+    "\"http://dx.doi.org/\\([^\"]*\\)\""
+    "/doi/\\([^\"]*\\)\">"
+    "doi/full/\\(.*\\)&"
+    "doi=\\([^&]*\\)&amp")
+  "List of regexps to match a DOI.
+The doi should be in group 1 so that (match-string 1) contains
+the DOI."
+  :type '(repeat regexp)
+  :group 'org-ref-url-utils)
+
+(defvar org-ref-url-title-re
+  "<title.?+?>\\([[:ascii:][:nonascii:]]*?\\|.+\\)</title>"
+  "Regular expression for matching title.")
+
+(defvar org-ref-url-author-re
+  "<meta name=\"author\" content=\"\\(.+\\)\"\s?/?>"
+  "Regular expression for matching author.")
+
+(defvar org-ref-url-date-re
+  "<[a-z].+ class=\\(.?+date.[^>]*\\)>\\([[:ascii:][:nonascii:]]*?\\)</[a-z].+>"
+  "Regular expression for matching date.")
+
+(defvar org-ref-url-bibtex-template
+  "@misc{key,
+  title        = {${:title}},
+  author       = {${:author}},
+  howpublished = {${:url}},
+  year         = {${:year}},
+  note         = {Online; accessed ${:urldate}}
+}"
+  "BibTeX entry template for online sources.")
+
+(defvar org-ref-url-biblatex-template
+  "@online{key,
+title   = {${:title}},
+author  = {${:author}},
+url     = {${:url}}
+year    = {${:year}},
+urldate = {Online; accessed ${:urldate}}
+}"
+  "Biblatex entry template for online sources.")
 
 
-(defun org-ref-url-dnd-doi-func (event)
-  "Drag-n-Drop support to add a bibtex entry from a url."
-  (interactive "e")
-  (goto-char (nth 1 (event-start event)))
-  (x-focus-frame nil)
-  (let* ((payload (car (last event)))
-         (url (cadr payload))
-	 (doi (org-ref-scrape-doi url)))
-    (if doi
-	(doi-utils-add-bibtex-entry-from-doi doi (buffer-file-name))
-      (message "No DOI found at %s." url))))
+;;* Scrape DOIs from a URL
+
+(defun org-ref-url-scrape-dois (url)
+  "Scrape all dois from a URL matching a pattern in `org-ref-doi-regexps'.
+Returns a list of collected DOIs in the order found."
+  (let ((dois '()))
+    (with-current-buffer (url-retrieve-synchronously url)
+      (cl-loop for doi-pattern in org-ref-doi-regexps
+	    do
+	    (goto-char (point-min))
+	    (while (re-search-forward doi-pattern nil t)
+	      (cl-pushnew (match-string 1) dois :test #'equal)))
+      (reverse dois))))
+
+
+(defun org-ref-url-add-doi-entries (_)
+  "Add all entries for CANDIDATE in `helm-marked-candidates'.
+This is used in a helm selection command in `org-ref-url-dnd-protocol'."
+  (cl-loop for doi in (helm-marked-candidates)
+	   do
+	   (doi-utils-add-bibtex-entry-from-doi
+	    doi
+	    (buffer-file-name))
+	   ;; this removes two blank lines before each entry.
+	   (bibtex-beginning-of-entry)
+	   (delete-char -2)))
 
 
 (defun org-ref-url-dnd-protocol (url action)
   "Protocol function for use in `dnd-protocol-alist'.
-If a doi is found, add a bibtex entry from it. Otherwise, create
-a misc entry, with prompt for key."
-  (if (f-ext? (buffer-file-name) "bib")
-      (let ((doi (org-ref-scrape-doi url)))
+We scrape DOIs from the url first. If there is one, we add it. If
+there is more than one, we offer a helm buffer of selections. If
+no DOI is found, we create a misc entry, with a prompt for a key."
+  ;; make sure we are on a bib-file
+  (if (and (buffer-file-name)
+	   (f-ext? (buffer-file-name) "bib"))
+      (let ((dois (org-ref-url-scrape-dois url)))
 	(cond
-	 (doi
-	  (doi-utils-add-bibtex-entry-from-doi doi (buffer-file-name))
+	 ;; One doi found. Assume it is what we want.
+	 ((= 1 (length dois))
+	  (doi-utils-add-bibtex-entry-from-doi
+	   (car dois)
+	   (buffer-file-name))
 	  action)
-	 ;; no doi found. add misc entry
+	 ;; Multiple DOIs found
+	 ((> (length dois) 1)
+	  (helm :sources
+		`((name . "Select a DOI")
+		  (candidates . ,(let ((dois '()))
+				   (with-current-buffer (url-retrieve-synchronously url)
+				     (cl-loop for doi-pattern in org-ref-doi-regexps
+					      do
+					      (goto-char (point-min))
+					      (while (re-search-forward doi-pattern nil t)
+						(cl-pushnew
+						 ;; Cut off the doi, sometimes
+						 ;; false matches are long.
+						 (cons (format "%40s | %s"
+							       (substring
+								(match-string 1)
+								0 (min
+								   (length (match-string 1))
+								   40))
+							       doi-pattern)
+						       (match-string 1))
+						 dois
+						 :test #'equal)))
+				     (reverse dois))))
+		  (action . org-ref-url-add-doi-entries)))
+	  action)
+	 ;; No DOIs found, add a misc entry.
 	 (t
 	  (goto-char (point-max))
 	  (insert (format "\n@misc{,
-  url = {%s},
-  note = {Last accessed %s}
-}"
+    url = {%s},
+    note = {Last accessed %s}
+  }"
 			  url
 			  (current-time-string)))
 	  (bibtex-clean-entry)
 	  action)))
-    ;; ignoring. pass back to dnd. Copied from `org-download-dnd'. Apparently
+    ;; pass back to dnd. Copied from `org-download-dnd'. Apparently
     ;; returning nil does not do this.
     (let ((dnd-protocol-alist
 	   (rassq-delete-all
@@ -187,8 +201,208 @@ a misc entry, with prompt for key."
       (dnd-handle-one-url nil action url))))
 
 
-;; (define-key bibtex-mode-map (kbd "<drag-n-drop>") 'org-ref-url-dnd-doi-func)
 (add-to-list 'dnd-protocol-alist '("^https?" . org-ref-url-dnd-protocol))
+
+;;* Enable a DOI to be dragged onto a bibtex buffer
+(defun org-ref-doi-dnd-protocol (doi action)
+  "Protocol for when a doi is dragged onto a bibtex file.
+A doi will be either doi:10.xxx  or 10.xxx."
+  (if (and (buffer-file-name)
+	   (f-ext? (buffer-file-name) "bib"))
+      (let ((doi (dnd-unescape-uri doi)))
+	;; Get the actual doi now
+	(string-match "\\(?:DOI\\|doi\\)?:? *\\(10.*\\)" doi)
+	(setq doi (match-string 1 doi))
+	(when doi
+	  (doi-add-bibtex-entry doi (buffer-file-name))
+	  (save-buffer)
+	  action))
+    ;; not on a bib file
+    (let ((dnd-protocol-alist
+	   (rassq-delete-all
+	    'org-ref-url-dnd-protocol
+	    (copy-alist dnd-protocol-alist))))
+      (dnd-handle-one-url nil action doi))))
+
+(add-to-list 'dnd-protocol-alist '("^doi" . org-ref-doi-dnd-protocol))
+(add-to-list 'dnd-protocol-alist '("^10" . org-ref-doi-dnd-protocol))
+
+
+;;* Debug URL in a buffer with C-dnd
+
+;; You can use this to see if there are any DOIs in a URL, and to use re-builder
+;; to add new patterns to `org-ref-doi-regexps'.
+;;;###autoload
+(defun org-ref-url-debug-url (url)
+  "Open a buffer to URL with all doi patterns highlighted."
+  (interactive)
+  (switch-to-buffer
+   (url-retrieve-synchronously url))
+  (highlight-regexp
+   (mapconcat 'identity org-ref-doi-regexps "\\|")))
+
+
+;;;###autoload
+(defun org-ref-url-dnd-debug (event)
+  "Drag-n-drop function to debug a url."
+  (interactive "e")
+  (org-ref-url-debug-url (cadr (car (last event)))))
+
+
+(define-key bibtex-mode-map (kbd "<C-drag-n-drop>") 'org-ref-url-dnd-debug)
+
+;;* Add all DOI bibtex entries with M-dnd
+
+(defun org-ref-url-add-all-doi-entries (url)
+  "Add all DOI bibtex entries for URL."
+  (cl-loop for doi in (org-ref-url-scrape-dois url)
+	do
+	(ignore-errors
+	  (doi-utils-add-bibtex-entry-from-doi
+	   doi
+	   (buffer-file-name))
+	  ;; this removes two blank lines before each entry.
+	  (bibtex-beginning-of-entry)
+	  (delete-char -2))))
+
+
+;;;###autoload
+(defun org-ref-url-dnd-all (event)
+  "Drag-n-drop function to get all DOI bibtex entries for a url.
+You probably do not want to do this since the DOI patterns are
+not perfect, and some hits are not actually DOIs."
+  (interactive "e")
+  (org-ref-url-add-all-doi-entries (cadr (car (last event)))))
+
+(define-key bibtex-mode-map (kbd "<M-drag-n-drop>") 'org-ref-url-dnd-all)
+
+
+;; Get first DOI if there is one with s-dnd
+(defun org-ref-url-add-first-doi-entry (url)
+  "Add first DOI bibtex entry for URL if there is one."
+  (let* ((dois (org-ref-url-scrape-dois url))
+	 (doi (car dois)))
+    (if doi
+	(progn
+	  (doi-utils-add-bibtex-entry-from-doi
+	   doi
+	   (buffer-file-name))
+	  ;; this removes two blank lines before each entry.
+	  (bibtex-beginning-of-entry)
+	  (delete-char -2))
+      ;; no doi, add misc
+      (goto-char (point-max))
+	  (insert (format "\n@misc{,
+    url = {%s},
+    note = {Last accessed %s}
+  }"
+			  url
+			  (current-time-string)))
+	  (bibtex-clean-entry))))
+
+
+;;;###autoload
+(defun org-ref-url-dnd-first (event)
+  "Drag-n-drop function to download the first DOI in a url."
+  (interactive "e")
+  (org-ref-url-add-first-doi-entry (cadr (car (last event)))))
+
+(define-key bibtex-mode-map (kbd "<s-drag-n-drop>") 'org-ref-url-dnd-first)
+
+
+;; HTML to BibTeX functions
+
+(defun org-ref-url-html-replace (string)
+  "Replace HTML entities in STRING with their unicode equivalent."
+  (let (result
+	(case-fold-search nil))
+    (with-temp-buffer
+      (insert string)
+      (mapc (lambda (char)
+	      (goto-char (point-min))
+	      (while (re-search-forward (car char) nil t)
+		(replace-match (cdr char))))
+	    org-cliplink-escape-alist)
+      (setq result (buffer-substring (point-min) (point-max))))
+    result))
+
+
+(defun org-ref-url-add-nil (list)
+  "Add nil to all missing keys in LIST."
+  (let (newlist)
+    (mapc (lambda (key)
+	    (unless (alist-get key list)
+	      (push (cons key "nil") newlist)))
+	  (list :title :author :url :urldate :year))
+    (append list newlist)))
+
+
+(defun org-ref-url-html-read (url)
+  "Read URL content and return fields.
+Fields include author, title, url, urldate, and year."
+  ;; Start with fields we already know
+  (let ((fields `((:url . ,url)
+		  (:urldate . ,(format-time-string "%d %B %Y")))))
+    (with-current-buffer
+	(url-retrieve-synchronously url t t)
+
+      ;; find pubdate
+      (goto-char (point-min))
+      (when (re-search-forward org-ref-url-date-re nil t)
+	(let ((string (match-string 2)))
+	  (when (string-match "\\([0-9]\\{4\\}\\)" string)
+	    (push (cons :year (match-string 1 string)) fields))))
+
+      ;; find author
+      (goto-char (point-min))
+      (when (re-search-forward org-ref-url-author-re nil t)
+	(push (cons :author (match-string 1)) fields))
+
+      ;; find title
+      (goto-char (point-min))
+      (when (re-search-forward org-ref-url-title-re nil t)
+	(push (cons :title
+		    (s-trim (decode-coding-string (match-string 1) 'utf-8)))
+	      fields)))
+
+    ;; Finally add nil value to missing fields
+    (org-ref-url-add-nil fields)))
+
+
+;;;###autoload
+(defun org-ref-url-html-to-bibtex (bibfile &optional url)
+  "Convert URL to a bibtex or biblatex entry in BIBFILE.
+If URL is the first in the kill ring, use it. Otherwise, prompt for
+one in the minibuffer."
+  (interactive (if (-contains? (org-ref-find-bibliography) (buffer-file-name))
+		   (list (buffer-file-name))
+		 (list (completing-read "Bibtex file: " (org-ref-find-bibliography)))))
+  (let ((url (if url url
+	       (if (s-match "^http" (current-kill 0 'do-not-move))
+		   (format "%s" (current-kill 0 'do-not-move))
+		 (read-from-minibuffer "URL: ")))))
+    (with-current-buffer
+	(find-file-noselect bibfile)
+      ;; Maybe check dialect if set as local variable
+      (let* ((dialect bibtex-dialect)
+	     (alist (org-ref-url-html-read url))
+	     (entry (s-format
+		     ;; Check dialect and format entry accordingly
+		     (if (eq dialect 'biblatex)
+			 org-ref-url-biblatex-template
+		       org-ref-url-bibtex-template)
+		     'aget alist)))
+	(goto-char (point-max))
+	;; Place new entry one line after the last entry.
+	(while (not (looking-back "^}\n" 2))
+	  (delete-char -1))
+	(insert "\n")
+	(insert (if (require 'org-cliplink nil 'noerror)
+		    ;; Sanitize values by replacing html entities
+		    (org-ref-url-html-replace entry)
+		  entry))
+	(bibtex-beginning-of-entry)
+	(org-ref-clean-bibtex-entry)))))
 
 (provide 'org-ref-url-utils)
 ;;; org-ref-url-utils.el ends here

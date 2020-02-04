@@ -1,4 +1,4 @@
-;;; unsrt.el --- Citation Style Lisp - the other CSL
+;;; author-year.el --- Citation Style Lisp - the other CSL
 
 
 ;;; Commentary:
@@ -7,43 +7,20 @@
 ;;; Code:
 
 (setq citation-style
-  '((label . orcp-citation-number-label)
-    (prefix . "")
-    (suffix . "")
-    (chomp-leading-space . t)
-    (chomp-trailing-space . nil)
-    ;; sort on increasing citation numbers.
-    (sort . (lambda (key1 key2)
-	      (let ((i1 (-find-index
-			 (lambda (entry)
-			   (string= key1 (car entry)))
-			 *orcp-unique-entries*))
-		    (i2 (-find-index
-			 (lambda (entry)
-			   (string= key2 (car entry)))
-			 *orcp-unique-entries*)))
-		(> i2 i1))))
-    (collapse . 'orcp-collapse-numeric-range)
-    (delimiter . ",")
-    (vertical-align . superscript)
-    (transpose-punctuation . t)		;put citations on right of punctuation
-    (citenum . ((vertical-align . baseline)
-		(prefix . " ")
-		(suffix . " ")
-		(chomp-leading-space . nil)
-		(chomp-trailing-space . nil)))
+  '((label . orcp-citation-author-year-label)
+    (prefix . "(")
+    (suffix . ")")
+    (delimiter . "; ")
     (citeauthor . ((vertical-align . baseline)
 		   (label . orcp-citation-author-label)
 		   (prefix . "")
-		   (suffix . " ")
-		   (chomp-leading-space . nil)
-		   (chomp-trailing-space . nil)))
+		   (suffix . " ")))
     (citeyear . ((vertical-align . baseline)
 		 (label . orcp-citation-year-label)
 		 (prefix . "")
 		 (suffix . " ")
 		 (chomp-leading-space . nil)
-		 (chomp-trailing-space . nil)))))
+		 ))))
 
 
 
@@ -52,16 +29,17 @@
     (hanging-indent . 3)
     (justification . full)
     (spacing . 1)
-    (label . orcp-citation-number-label)
-    (label-prefix . "")
-    (label-suffix . ". ")
+    (label . orcp-citation-author-year-label)
+    (label-prefix . "(")
+    (label-suffix . ") ")
     (header . ((text . "Bibliography")
 	       (font-style . bold)))
     ;; Formatting of fields
     ;; Single author name
     (author . ((initialize . t)		; use initials, not full names
-	       (name-order . (lastname firstname))
-	       (name-separator . ", ")
+	       ;; use firstname and lastname symbols
+	       (name-order . (firstname lastname))
+	       (name-separator . " ")
 	       (et-al . 4)		; after 4 authors use et-al
 	       (delimiter . "; ")
 	       (last-author-delimiter . " and ")
@@ -70,9 +48,13 @@
 	       ;; ; function to convert (first von last jr) to a string.)
 	       (name-format . ''format-author-name)
 	       (field-separator ", ")))
+
     (title . ((font-style . italics)
 	      (suffix . "")
 	      (field-separator . ", ")))
+    (booktitle . ((font-style . italics)
+		  (suffix . "")
+		  (field-separator . "in ")))
     (journal . ((suffix . "")
 		(field-separator . ", ")))
     ;; here we use some logic to group volume(issue) or volume
@@ -96,13 +78,15 @@
 	    (formatter . orcp-doi-formatter)))
     ;; Formatting of entries
     (entries . ((article . (author title journal volume pages year doi))
+		(inproceedings . (author title booktitle year))
 		(book . (author title year))
+		(manual . (author title url doi))
 		(misc . (author title url doi))
 		(techreport . (author title institution year))
 		(mastersthesis . (author title school year))
 		(phdthesis . (author title school year))
 		(t . (author title year))))))
 
-(provide 'unsrt)
+(provide 'author-year)
 
-;;; unsrt.el ends here
+;;; author-year.el ends here

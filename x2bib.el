@@ -39,7 +39,7 @@
 
 ;;; Code:
 (require 'bibtex)
-(require 'org-ref)
+(require 'org-ref-core)
 
 ;;* RIS to bibtex
 
@@ -49,33 +49,45 @@
 ;; you should probably inspect the entries, and do other bibtex file compliance
 ;; checks.
 
+;;;###autoload
 (defun ris2bib (risfile &optional verbose)
   "Convert RISFILE to bibtex and insert at point.
 Without a prefix arg, stderr is diverted.
-If VERBOSE is non-nil show command output."
+If VERBOSE is non-nil show command output.
+If the region is active, assume it is a ris entry
+and convert it to bib format in place."
   (interactive
-   (list (read-file-name "RIS file:")
+   (list (if (not (region-active-p))
+             (read-file-name "RIS file:"))
          (prefix-numeric-value current-prefix-arg)))
-  (let ((result (shell-command-to-string
-                 (concat
-                  (format
-                   "ris2xml %s | xml2bib -w"
-                   risfile)
-                  (unless verbose " 2> /dev/null")))))
+  (let ((result
+         (if risfile
+             (shell-command-to-string
+              (concat
+               (format
+                "ris2xml %s | xml2bib -w"
+                risfile)
+               (unless verbose " 2> /dev/null")))
+           (progn
+             (shell-command-on-region (region-beginning) (region-end)
+                                      "ris2xml 2> /dev/null | xml2bib -w 2> /dev/null" nil
+                                      t)
+                  nil))))
     ;; make some lines into comments.
-    (setq result (replace-regexp-in-string
-                  "^xml2bib:"
-                  "% xml2bib:"
-                  result))
-    (setq result (replace-regexp-in-string
-                  "^ris2xml:"
-                  "% ris2xml"
-                  result))
-    (setq result (replace-regexp-in-string
-                  "^	Defaulting"
-                  "%	Defaulting"
-                  result))
-    (insert result)))
+    (when result
+      (setq result (replace-regexp-in-string
+                    "^xml2bib:"
+                    "% xml2bib:"
+                    result))
+      (setq result (replace-regexp-in-string
+                    "^ris2xml:"
+                    "% ris2xml"
+                    result))
+      (setq result (replace-regexp-in-string
+                    "^	Defaulting"
+                    "%	Defaulting"
+                    result))
+      (insert result))))
 
 ;;* Pubmed XML to bibtex
 
@@ -83,6 +95,7 @@ If VERBOSE is non-nil show command output."
 ;; them to a file. If you choose Pubmed XML as the format, then you can use this
 ;; function to convert it to bibtex.
 
+;;;###autoload
 (defun medxml2bib (medfile &optional verbose)
   "Convert MEDFILE (in Pubmed xml) to bibtex and insert at point.
 Without a prefix arg, stderr is diverted.
@@ -116,6 +129,7 @@ Display output if VERBOSE is non-nil."
 ;; Finally, after you put the new entries in, you probably need to do some clean
 ;; up actions. This little function does that.
 
+;;;###autoload
 (defun clean-entries ()
   "Map over bibtex entries and clean them."
   (interactive)

@@ -26,7 +26,7 @@
     (collapse . 'orcp-collapse-numeric-range)
     (delimiter . ",")
     (vertical-align . baseline)
-    (transpose-punctuation . nil)		;put citations on right of punctuation
+    (transpose-punctuation . nil)	;put citations on right of punctuation
     (citenum . ((vertical-align . baseline)
 		(prefix . "")
 		(suffix . "")
@@ -44,7 +44,6 @@
 		 (suffix . "")
 		 (chomp-leading-space . nil)
 		 (chomp-trailing-space . nil)))))
-
 
 
 (setq bibliography-style

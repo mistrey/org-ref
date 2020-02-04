@@ -51,19 +51,17 @@
 
 (require 'dash)
 (require 'org)
+(require 'org-ref-utils)
 
-(org-add-link-type
- "pmid"
- ;; clicking
- (lambda (link-string) (browse-url (format "http://www.ncbi.nlm.nih.gov/pubmed/%s" link-string)))
- ;; formatting
- (lambda (keyword desc format)
-   (cond
-    ((eq format 'html)
-     (format "<a href=\"http://www.ncbi.nlm.nih.gov/pmc/articles/mid/%s\">pmid:%s</a>" keyword (or desc keyword))) ; no output for html
-    ((eq format 'latex)
-     ;; write out the latex command
-     (format "\\url{http://www.ncbi.nlm.nih.gov/pmc/articles/mid/%s}{%s}" keyword (or desc keyword))))))
+(org-ref-link-set-parameters "pmid"
+  :follow (lambda (link-string) (browse-url (format "http://www.ncbi.nlm.nih.gov/pubmed/%s" link-string)))
+  :export (lambda (keyword desc format)
+            (cond
+             ((eq format 'html)
+              (format "<a href=\"http://www.ncbi.nlm.nih.gov/pmc/articles/mid/%s\">pmid:%s</a>" keyword (or desc keyword))) ; no output for html
+             ((eq format 'latex)
+              ;; write out the latex command
+              (format "\\url{http://www.ncbi.nlm.nih.gov/pmc/articles/mid/%s}{%s}" keyword (or desc keyword))))))
 
 ;;** Get MEDLINE metadata
 
@@ -115,7 +113,7 @@
 (defun pubmed-pmid-to-bibtex (pmid)
   "Convert a PMID to a bibtex entry."
   (let* ((data (pubmed-parse-medline pmid))
-         (type (cdr (assoc "PT" data)))
+         (type (downcase (cdr (assoc "PT" data))))
          (title (cdr (assoc "TI" data)))
          (authors (mapconcat 'cdr
                              (-filter (lambda (x)
@@ -131,7 +129,7 @@
          (aid (cdr (assoc "AID" data))))
 
     (cond
-     ((string= type "JOURNAL ARTICLE")
+     ((string= type "journal article")
       (concat "@article{,
  author = {" authors "},
  title = {" title "},
@@ -141,13 +139,14 @@
  number = {" issue "},
  year = {" (car (split-string year)) "},
  pages = {" pages "},
- doi = {" (replace-regexp-in-string " \\[doi\\]" "" aid) "},
+ doi = {" (replace-regexp-in-string " \\[doi\\]" "" (or aid "")) "},
 }"))
      (t
       (message "No conversion for type: %s" type)))))
 
 ;; And we probably want to be able to insert a bibtex entry
 
+;;;###autoload
 (defun pubmed-insert-bibtex-from-pmid (pmid)
   "Insert a bibtex entry at point derived from PMID.
 You must clean the entry after insertion."
@@ -161,6 +160,7 @@ You must clean the entry after insertion."
 ;; undo. I have not used this code for anything, so I am not sure how good the
 ;; xml code is.
 
+;;;###autoload
 (defun pubmed-get-medline-xml (pmid)
   "Get MEDLINE xml for PMID as a string."
   (interactive)
@@ -190,17 +190,14 @@ You must clean the entry after insertion."
 ;; Here we define a new link. Clicking on it simply opens a webpage to the
 ;; article.
 
-(org-add-link-type
- "pmcid"
- ;; clicking
- (lambda (link-string) (browse-url (format "http://www.ncbi.nlm.nih.gov/pmc/articles/%s" link-string)))
- ;; formatting
- (lambda (keyword desc format)
-   (cond
-    ((eq format 'html)
-     (format "<a href=\"http://www.ncbi.nlm.nih.gov/pmc/articles/%s\">pmcid:%s</a>" keyword (or desc keyword)))
-    ((eq format 'latex)
-     (format "\\url{http://www.ncbi.nlm.nih.gov/pmc/articles/%s}{%s}" keyword (or desc keyword))))))
+(org-ref-link-set-parameters "pmcid"
+  :follow (lambda (link-string) (browse-url (format "http://www.ncbi.nlm.nih.gov/pmc/articles/%s" link-string)))
+  :export (lambda (keyword desc format)
+            (cond
+             ((eq format 'html)
+              (format "<a href=\"http://www.ncbi.nlm.nih.gov/pmc/articles/%s\">pmcid:%s</a>" keyword (or desc keyword)))
+             ((eq format 'latex)
+              (format "\\url{http://www.ncbi.nlm.nih.gov/pmc/articles/%s}{%s}" keyword (or desc keyword))))))
 
 ;;* NIHMSID
 
@@ -211,53 +208,85 @@ You must clean the entry after insertion."
 ;; inclusion in PMC and the corresponding citation is in PubMed, the article
 ;; will also be assigned a PMCID.
 
-(org-add-link-type
- "nihmsid"
- ;; clicking
- (lambda (link-string) (browse-url (format "http://www.ncbi.nlm.nih.gov/pmc/articles/mid/%s" link-string)))
- ;; formatting
- (lambda (keyword desc format)
-   (cond
-    ((eq format 'html)
-     (format "<a href=\"http://www.ncbi.nlm.nih.gov/pmc/articles/mid//%s\">nihmsid:%s</a>" keyword (or desc keyword)))
-    ((eq format 'latex)
-     ;; write out the latex command
-     (format "\\url{http://www.ncbi.nlm.nih.gov/pmc/articles/mid/%s}{%s}" keyword (or desc keyword))))))
+(org-ref-link-set-parameters "nihmsid"
+  :follow (lambda (link-string) (browse-url (format "http://www.ncbi.nlm.nih.gov/pmc/articles/mid/%s" link-string)))
+  :export (lambda (keyword desc format)
+            (cond
+             ((eq format 'html)
+              (format "<a href=\"http://www.ncbi.nlm.nih.gov/pmc/articles/mid//%s\">nihmsid:%s</a>" keyword (or desc keyword)))
+             ((eq format 'latex)
+              ;; write out the latex command
+              (format "\\url{http://www.ncbi.nlm.nih.gov/pmc/articles/mid/%s}{%s}" keyword (or desc keyword))))))
 
 
 ;;* Searching pubmed
 
+;;;###autoload
 (defun pubmed ()
   "Open http://www.ncbi.nlm.nih.gov/pubmed in a browser."
   (interactive)
   (browse-url "http://www.ncbi.nlm.nih.gov/pubmed"))
 
 
+;;;###autoload
 (defun pubmed-advanced ()
   "Open http://www.ncbi.nlm.nih.gov/pubmed/advanced in a browser."
   (interactive)
   (browse-url "http://www.ncbi.nlm.nih.gov/pubmed/advanced"))
 
 
+;;;###autoload
 (defun pubmed-simple-search (query)
   "Open QUERY in Pubmed in a browser."
   (interactive "sQuery: ")
   (browse-url
-   (format "http://www.ncbi.nlm.nih.gov/pubmed/?term=%s" query)))
+   (format "http://www.ncbi.nlm.nih.gov/pubmed/?term=%s" (url-hexify-string query))))
 
 
-(org-add-link-type
- "pubmed-search"
- (lambda (query)
-   "Open QUERY in a `pubmed-simple-search'."
-   (pubmed-simple-search query))
- (lambda (query desc format)
-   (let ((url (format "http://www.ncbi.nlm.nih.gov/pubmed/?term=%s" query)))
-     (cond
-      ((eq format 'html)
-       (format "<a href=\"%s\">%s</a>" url (or desc (concat "pubmed-search:" query))))
-      ((eq format 'latex)
-       (format "\\href{%s}{%s}" url (or desc (concat "pubmed-search:" query))))))))
+(org-ref-link-set-parameters "pubmed-search"
+  :follow (lambda (query)
+            "Open QUERY in a `pubmed-simple-search'."
+            (pubmed-simple-search query))
+  :export (lambda (query desc format)
+            (let ((url (format "http://www.ncbi.nlm.nih.gov/pubmed/?term=%s" (url-hexify-string query))))
+              (cond
+               ((eq format 'html)
+                (format "<a href=\"%s\">%s</a>" url (or desc (concat "pubmed-search:" query))))
+               ((eq format 'latex)
+                (format "\\href{%s}{%s}" url (or desc (concat "pubmed-search:" query))))))))
+
+;; ** Pubmed clinical
+;; These functions were suggested by Colin Melville <casm40@gmail.com>.
+;;;###autoload
+(defun pubmed-clinical ()
+  "Open http://www.ncbi.nlm.nih.gov/pubmed/clinical in a browser."
+  (interactive)
+  (browse-url "http://www.ncbi.nlm.nih.gov/pubmed/clinical"))
+
+
+;;;###autoload
+(defun pubmed-clinical-search (query)
+  "Open QUERY in pubmed-clinical."
+  (interactive "sQuery: ")
+  (browse-url
+   (format "https://www.ncbi.nlm.nih.gov/pubmed/clinical?term=%s" (url-hexify-string query))))
+
+
+(org-ref-link-set-parameters "pubmed-clinical"
+  :follow (lambda (query)
+            "Open QUERY in a `pubmed-clinical-search'."
+            (pubmed-clinical-search query))
+  :export (lambda (query desc format)
+            (let ((url (format "http://www.ncbi.nlm.nih.gov/pubmed/clinical?term=%s"
+			       (url-hexify-string query))))
+              (cond
+               ((eq format 'html)
+                (format "<a href=\"%s\">%s</a>" url
+			(or desc (concat "pubmed-clinical-search:" query))))
+               ((eq format 'latex)
+                (format "\\href{%s}{%s}" url
+			(or desc (concat "pubmed-clinical-search:" query))))))))
+
 
 (provide 'org-ref-pubmed)
 ;;; org-ref-pubmed.el ends here

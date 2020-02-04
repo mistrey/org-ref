@@ -24,16 +24,20 @@
 ;;
 
 ;;; Code:
-(require 'org-ref)
+(require 'org-ref-core)
+
+(defvar latex-mode-map)
+(defvar org-ref-cite-types)
 
 
 (defvar org-ref-latex-cite-re
   (concat "\\\\\\(" (mapconcat
 		     (lambda (x)
-		       (replace-regexp-in-string "\*" "\\\\*" x))
+		       (replace-regexp-in-string "\\*" "\\\\*" x))
 		     org-ref-cite-types
 		     "\\|")
 	  "\\)"
+	  "\\(\\[[^}]*\\)?"		; optional []
 	  "\\(\\[[^}]*\\)?"		; optional []
 	  "{\\([^}]*\\)}")
   "Regexp for LaTeX citations. \citetype[optional]{some,keys}.
@@ -55,6 +59,7 @@ The clickable part are the keys.")
     (buffer-substring-no-properties start end)))
 
 
+;;;###autoload
 (defun org-ref-latex-debug ()
   (interactive)
   (message-box "%S\n%S\n%S\n%S"
@@ -73,6 +78,7 @@ The clickable part are the keys.")
     (bibtex-search-entry (car results))))
 
 
+;;;###autoload
 (defun org-ref-latex-click ()
   "Jump to entry clicked on."
   (interactive)
@@ -85,7 +91,7 @@ The clickable part are the keys.")
 				  (funcall f)))))))
 
 
-(defun org-ref-latex-help-echo (window object position)
+(defun org-ref-latex-help-echo (_window _object position)
   "Get tool tip for a key in WINDOW for OBJECT at POSITION."
   (save-excursion
     (goto-char position)
