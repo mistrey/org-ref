@@ -401,8 +401,10 @@ one in the minibuffer."
 		    ;; Sanitize values by replacing html entities
 		    (org-ref-url-html-replace entry)
 		  entry))
+	(insert "\n")
 	(bibtex-beginning-of-entry)
-	(org-ref-clean-bibtex-entry)))))
+	(org-ref-clean-bibtex-entry)
+	(save-buffer)))))
 
 (provide 'org-ref-url-utils)
 ;;; org-ref-url-utils.el ends here

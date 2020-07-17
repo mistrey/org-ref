@@ -719,6 +719,10 @@ If so return the position for `goto-char'."
   :type 'string
   :group 'org-ref)
 
+(defcustom org-ref-latex-bib-resolve-func #'file-relative-name
+  "used to expand paths to the bibliography file on latex export."
+  :type 'function
+  :group 'org-ref)
 
 (defvar org-ref-cite-re
   (concat "\\(" (mapconcat
@@ -1088,7 +1092,7 @@ PREDICATE."
 	     "\\.bib" ""
 	     (mapconcat
 	      'identity
-	      (mapcar 'file-relative-name
+	      (mapcar org-ref-latex-bib-resolve-func
 		      (split-string keyword ","))
 	      ","))))))
 
@@ -1181,7 +1185,7 @@ font-lock-warning-face if any file does not exist."
 	    (replace-regexp-in-string
 	     "\\.bib" ""
 	     (mapconcat 'identity
-			(mapcar 'file-relative-name
+			(mapcar org-ref-latex-bib-resolve-func
 				(split-string keyword ","))
 			","))))))
 
@@ -2665,66 +2669,26 @@ the entry of interest in the bibfile.  but does not check that."
           (org-open-link-from-string (format "[[file:%s]]" pdf))
         (ding)))))
 
-(defun org-ref-notes-function-one-file (thekey)
-  "Function to open note belonging to THEKEY.
 
+(defun org-ref-notes-function-one-file (key)
+  "Function to open note belonging to KEY.
  Set `org-ref-notes-function' to this function if you use one
 long file with headlines for each entry."
-  (let*
-      ((results
-        (org-ref-get-bibtex-key-and-file thekey))
-       (key
-        (car results))
-       (bibfile
-        (cdr results)))
-    (with-temp-buffer
-      (insert-file-contents bibfile)
-      (bibtex-set-dialect
-       (parsebib-find-bibtex-dialect)
-       t)
-      (bibtex-search-entry key)
-      (org-ref-open-bibtex-notes))))
+  ;; save key to clipboard to make saving pdf later easier by pasting.
+  (with-temp-buffer
+    (insert key)
+    (kill-ring-save (point-min) (point-max)))
+  (let ((entry (with-temp-buffer
+		 (insert (org-ref-get-bibtex-entry key))
+		 (bibtex-mode)
+		 (bibtex-set-dialect nil t)
+		 (bibtex-beginning-of-entry)
+		 (bibtex-parse-entry)) ))
 
-(defun org-ref-notes-function-many-files (thekey)
-  "Function to open note belonging to THEKEY.
-
-Set `org-ref-notes-function' to this function if you use one file
-for each bib entry."
-  (let ((bibtex-completion-bibliography (org-ref-find-bibliography)))
-    (bibtex-completion-edit-notes
-     (list (car (org-ref-get-bibtex-key-and-file thekey))))))
-
-;;** Open notes from bibtex entry
-;;;###autoload
-(defun org-ref-open-bibtex-notes ()
-  "From a bibtex entry, open the notes if they exist.
-If the notes do not exist, then create a heading.
-
-I never did figure out how to use reftex to make this happen
-non-interactively.  the `reftex-format-citation' function did not
-work perfectly; there were carriage returns in the strings, and
-it did not put the key where it needed to be.  so, below I replace
-the carriage returns and extra spaces with a single space and
-construct the heading by hand."
-  (interactive)
-
-  (bibtex-beginning-of-entry)
-  (let* ((cb (current-buffer))
-         (bibtex-expand-strings t)
-         (entry (cl-loop for (key . value) in (bibtex-parse-entry t)
-                         collect (cons (downcase key) (s-collapse-whitespace value))))
-         (key (reftex-get-bib-field "=key=" entry)))
-
-    ;; save key to clipboard to make saving pdf later easier by pasting.
-    (with-temp-buffer
-      (insert key)
-      (kill-ring-save (point-min) (point-max)))
-
-    ;; now look for entry in the notes file
     (save-restriction
       (if  org-ref-bibliography-notes
-          (find-file-other-window org-ref-bibliography-notes)
-        (error "org-ref-bibliography-notes is not set to anything"))
+	  (find-file-other-window org-ref-bibliography-notes)
+	(error "org-ref-bibliography-notes is not set to anything"))
 
       (widen)
       (goto-char (point-min))
@@ -2734,8 +2698,8 @@ construct the heading by hand."
 	     (keys (mapcar
 		    (lambda (hl) (org-element-property :CUSTOM_ID hl))
 		    headlines)))
-	;; put new entry in notes if we don't find it.
 	(if (-contains? keys key)
+	    ;; we have it so we go to it.
 	    (progn
 	      (org-open-link-from-string (format "[[#%s]]" key))
 	      (funcall org-ref-open-notes-function))
@@ -2749,6 +2713,29 @@ construct the heading by hand."
 		      (funcall x))))
 		org-ref-create-notes-hook)
 	  (save-buffer))))))
+
+
+(defun org-ref-notes-function-many-files (thekey)
+  "Function to open note belonging to THEKEY.
+Set `org-ref-notes-function' to this function if you use one file
+for each bib entry."
+  (let ((bibtex-completion-bibliography (org-ref-find-bibliography)))
+    (bibtex-completion-edit-notes
+     (list (car (org-ref-get-bibtex-key-and-file thekey))))))
+
+;;** Open notes from bibtex entry
+;;;###autoload
+(defun org-ref-open-bibtex-notes ()
+  "From a bibtex entry, open the notes if they exist."
+  (interactive)
+  (bibtex-beginning-of-entry)
+  (let* ((cb (current-buffer))
+         (bibtex-expand-strings t)
+         (entry (cl-loop for (key . value) in (bibtex-parse-entry t)
+                         collect (cons (downcase key) (s-collapse-whitespace value))))
+         (key (reftex-get-bib-field "=key=" entry)))
+
+    (funcall org-ref-notes-function key)))
 
 
 ;;** Open bibtex entry in browser
@@ -3259,13 +3246,24 @@ If optional NEW-YEAR set it to that, otherwise prompt for it."
       (replace-match " \\\\& "))))
 
 
+(defvar orcb-%-replacement-string " \\\\%"
+  "Replacement for a naked % sign in cleaning a BibTeX entry.
+The replacement string should be escaped for use with
+`replace-match'. Compare to the default value. Common choices
+would be to omit the space or to replace the space with a ~ for a
+non-breaking space.")
+
 (defun orcb-% ()
-  "Replace naked % with % in a bibtex entry."
+  "Replace naked % with % in a bibtex entry.
+Except when it is already escaped or in a URL. The replacement
+for the % is defined by `orcb-%-replacement-string'."
   (save-restriction
     (bibtex-narrow-to-entry)
     (bibtex-beginning-of-entry)
-    (while (re-search-forward "%" nil t)
-      (replace-match " \\\\%"))))
+    (while (re-search-forward "\\([^\\]\\)%\\([^[:xdigit:]]\\)" nil t)
+      (replace-match (concat "\\1"
+                             orcb-%-replacement-string
+                             "\\2")))))
 
 
 (defun orcb-key-comma ()

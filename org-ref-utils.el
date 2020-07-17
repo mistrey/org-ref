@@ -470,6 +470,8 @@ Jabref, Mendeley and Zotero. See `bibtex-completion-find-pdf'."
   "Open the notes for bibtex key under point in a cite link in a buffer.
 Can also be called with THEKEY in a program."
   (interactive)
+  (when (null thekey)
+    (setq thekey (org-ref-get-bibtex-key-under-cursor)))
   (funcall org-ref-notes-function thekey))
 
 
@@ -477,17 +479,7 @@ Can also be called with THEKEY in a program."
 (defun org-ref-citation-at-point ()
   "Give message of current citation at point."
   (interactive)
-  (org-ref-format-entry (org-ref-get-bibtex-key-under-cursor))
-  ;; (let* ((results (org-ref-get-bibtex-key-and-file))
-  ;;        (key (car results))
-  ;;        (bibfile (cdr results)))
-  ;;   (message "%s" (progn
-  ;;                   (with-temp-buffer
-  ;;                     (insert-file-contents bibfile)
-  ;;                     (bibtex-set-dialect (parsebib-find-bibtex-dialect) t)
-  ;;                     (bibtex-search-entry key)
-  ;;                     (org-ref-bib-citation)))))
-  )
+  (org-ref-format-entry (org-ref-get-bibtex-key-under-cursor)))
 
 
 ;;;###autoload
@@ -850,11 +842,15 @@ From the PDF specification 1.7:
     The first line of a PDF file shall be a header consisting of
     the 5 characters %PDF- followed by a version number of the
     form 1.N, where N is a digit between 0 and 7."
-  (let ((header (with-temp-buffer
-                  (set-buffer-multibyte nil)
-                  (insert-file-contents-literally filename nil 0 5)
-                  (buffer-string))))
-    (string-equal (encode-coding-string header 'utf-8) "%PDF-")))
+  (let* ((header (with-temp-buffer
+		   (set-buffer-multibyte nil)
+		   (insert-file-contents-literally filename nil 0 5)
+		   (buffer-string)))
+	 (valid (string-equal (encode-coding-string header 'utf-8) "%PDF-")))
+    (if valid
+	valid
+      (message "Invalid pdf. Header = %s" header)
+      nil)))
 
 
 ;;;###autoload
